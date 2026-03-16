@@ -1,0 +1,71 @@
+@import "tailwindcss";
+
+@theme {
+  --color-background: #0a0a0a;
+  --color-foreground: #ededed;
+  --color-surface: #141414;
+  --color-surface-hover: #1a1a1a;
+  --color-border: #2a2a2a;
+  --color-border-hover: #3a3a3a;
+  --color-muted: #888888;
+  --color-accent: #6c5ce7;
+  --color-accent-hover: #7c6cf7;
+  --color-danger: #e74c3c;
+  --color-danger-hover: #c0392b;
+  --color-success: #2ecc71;
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  font-family: var(--font-sans);
+  background: var(--color-background);
+  color: var(--color-foreground);
+}
+
+/* ---- Excalidraw SVG viewer ---- */
+/* Rendered SVGs should inherit their container size */
+.excalidraw-svg-container svg {
+  max-width: 100%;
+  height: auto;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--color-surface);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-border-hover);
+}
+
+/* Loading animation */
+@keyframes pulse-glow {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 1; }
+}
+
+.animate-pulse-glow {
+  animation: pulse-glow 2s ease-in-out infinite;
+}
+
+@keyframes spin-slow {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.animate-spin-slow {
+  animation: spin-slow 3s linear infinite;
+}
