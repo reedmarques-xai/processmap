@@ -4,415 +4,48 @@ import { GrokExcalidrawResult, ExcalidrawScene, GrokModelConfig, ExtractUseCases
 import { EXCALIDRAW_PROCESS_MAP_PROMPT } from "./prompts/excalidraw-process-map";
 
 /**
- * Sends a Gong transcript to the xAI Grok API and receives back a complete
- * Excalidraw scene (elements, appState, files) plus a title and summary.
+ * Custom fetch wrapper that patches xAI API requests to enable reasoning
+ * streaming. The @ai-sdk/xai provider sends `reasoning: { effort }` but
+ * omits two things the API now requires to stream reasoning events:
  *
- * Uses the official @ai-sdk/xai provider for all Grok requests.
- * The system prompt instructs Grok to output raw Excalidraw JSON directly —
- * no intermediate format or client-side conversion needed.
+ * 1. `reasoning.summary: "auto"` — tells the API to generate and stream
+ *    human-readable reasoning summaries (`response.reasoning_summary_text.delta`).
+ *    Without this, no summary events are sent.
+ *
+ * 2. `include: ["reasoning.encrypted_content"]` — for grok-4+ models,
+ *    reasoning content is encrypted. This flag must be set for the API to
+ *    emit ANY reasoning-related SSE events during streaming.
+ *
+ * See: https://docs.x.ai/developers/model-capabilities/text/reasoning
  */
-export async function parseTranscriptWithGrok(
-  transcript: string,
-  apiKey: string,
-  modelConfig: GrokModelConfig
-): Promise<GrokExcalidrawResult> {
-  const xai = createXai({ apiKey });
-
-  // Truncate very long transcripts to ~12K chars (~3K tokens)
-  const maxChars = 12000;
-  const truncated =
-    transcript.length > maxChars
-      ? transcript.slice(0, maxChars) + "\n\n[Transcript truncated for processing]"
-      : transcript;
-
-  const userMessage = `Analyze this Gong sales-call transcript. Extract the prospect's CURRENT workflow/process being described (not the sales pitch or proposed solution) and generate a complete Excalidraw process map.
-
-Focus on:
-- How the prospect currently does things (their existing process)
-- Sequential steps, decision points, approvals, and handoffs
-- 8-20 steps for readability with concise labels
-
-After you generate the Excalidraw JSON, wrap your entire response in this structure (return ONLY this JSON, nothing else):
-{
-  "title": "Short descriptive title of the process",
-  "summary": "1-2 sentence summary of what this process covers",
-  "excalidraw": <your full Excalidraw JSON object here>
-}
-
-Here is the transcript:
-
-${truncated}`;
-
-  // Build options — only include reasoningEffort when specified (multi-agent models)
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const generateOptions: any = {
-    model: xai.responses(modelConfig.apiModelId),
-    messages: [
-      { role: "system", content: EXCALIDRAW_PROCESS_MAP_PROMPT },
-      { role: "user", content: userMessage },
-    ],
-    temperature: 0.3,
-    maxOutputTokens: 16384,
-  };
-
-  if (modelConfig.reasoningEffort) {
-    generateOptions.providerOptions = {
-      xai: { reasoningEffort: modelConfig.reasoningEffort },
-    };
-  }
-
-  console.log(`\x1b[32m[Grok API] parseTranscriptWithGrok using model: ${modelConfig.apiModelId}\x1b[0m`);
-  
-  // Use streaming with fullStream to capture both reasoning and text
-  const result = streamText(generateOptions);
-  
-  // Collect all text chunks from the stream
-  let content = "";
-  let inReasoning = false;
-  let inText = false;
-  
-  for await (const part of result.fullStream) {
-    // Handle reasoning chunks (thinking trace)
-    if (part.type === "reasoning-delta") {
-      if (!inReasoning) {
-        console.log("\x1b[33m[REASONING]\x1b[0m");
-        inReasoning = true;
-        inText = false;
+function createReasoningFetch(): typeof globalThis.fetch {
+  return async (input, init) => {
+    if (init?.body && typeof init.body === "string") {
+      try {
+        const body = JSON.parse(init.body);
+        if (body.reasoning && body.reasoning.effort) {
+          // Enable human-readable reasoning summaries in the stream
+          // Use "detailed" for more in-depth reasoning trace
+          if (!body.reasoning.summary) {
+            body.reasoning.summary = "detailed";
+          }
+          // Ensure reasoning events are included in the response
+          const includeSet = new Set<string>(body.include || []);
+          includeSet.add("reasoning.encrypted_content");
+          body.include = [...includeSet];
+          init = { ...init, body: JSON.stringify(body) };
+        }
+      } catch {
+        // Not JSON — pass through unchanged
       }
-      process.stdout.write((part as any).text ?? "");
     }
-    
-    // Handle text chunks (final response)
-    if (part.type === "text-delta") {
-      if (!inText) {
-        console.log("\x1b[32m[RESPONSE]\x1b[0m");
-        inText = true;
-        inReasoning = false;
-      }
-      const text = (part as any).text ?? "";
-      content += text;
-      process.stdout.write(text);
-    }
-  }
-
-  if (!content) {
-    throw new Error("No content in xAI API response");
-  }
-
-  // Strip markdown fences if present
-  let jsonStr = content.trim();
-  if (jsonStr.startsWith("```")) {
-    jsonStr = jsonStr.replace(/^```(?:json)?\n?/, "").replace(/\n?```$/, "");
-  }
-
-  const parsed = JSON.parse(jsonStr);
-
-  // ---- Validate the wrapper ----
-  if (!parsed.title || typeof parsed.title !== "string") {
-    throw new Error("Response missing 'title'");
-  }
-  if (!parsed.summary || typeof parsed.summary !== "string") {
-    throw new Error("Response missing 'summary'");
-  }
-
-  // ---- Validate the Excalidraw payload ----
-  const excalidraw = parsed.excalidraw;
-  if (!excalidraw || !Array.isArray(excalidraw.elements)) {
-    throw new Error("Response missing valid 'excalidraw.elements' array");
-  }
-  if (excalidraw.elements.length < 2) {
-    throw new Error("Excalidraw scene must have at least 2 elements");
-  }
-
-  return {
-    title: parsed.title,
-    summary: parsed.summary,
-    excalidraw: {
-      elements: excalidraw.elements,
-      appState: excalidraw.appState || {},
-      files: excalidraw.files || {},
-    },
+    return globalThis.fetch(input, init);
   };
 }
 
-/**
- * Takes an existing Excalidraw scene and a natural-language edit instruction,
- * sends both to Grok, and returns the updated scene plus a short summary of
- * what changed.
- */
-export async function editDiagramWithGrok(
-  currentExcalidraw: ExcalidrawScene,
-  instruction: string,
-  apiKey: string,
-  modelConfig: GrokModelConfig
-): Promise<{ excalidraw: ExcalidrawScene; summary: string }> {
-  const xai = createXai({ apiKey });
-
-  // Serialize just the elements array (appState/files are boilerplate)
-  const currentJson = JSON.stringify(
-    {
-      type: "excalidraw",
-      version: 2,
-      source: "https://excalidraw.com",
-      elements: currentExcalidraw.elements,
-      appState: currentExcalidraw.appState || {},
-      files: currentExcalidraw.files || {},
-    },
-    null,
-    2
-  );
-
-  const userMessage = `Here is the CURRENT Excalidraw diagram JSON:
-
-\`\`\`json
-${currentJson}
-\`\`\`
-
-Apply the following edit to the diagram:
-
-"${instruction}"
-
-Rules:
-- Return the COMPLETE updated Excalidraw JSON — all elements, not just the changed ones.
-- Follow every rule in the system prompt (numbering, sizing, bindings, layout, etc.).
-- Re-number steps if the edit inserts, removes, or reorders steps.
-- Keep all elements that are NOT affected by the edit exactly as they are.
-
-Wrap your response in this JSON structure (return ONLY this, nothing else):
-{
-  "summary": "Brief 1-sentence description of what changed",
-  "excalidraw": <your full updated Excalidraw JSON object>
-}`;
-
-  // Build options — only include reasoningEffort when specified (multi-agent models)
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const generateOptions: any = {
-    model: xai.responses(modelConfig.apiModelId),
-    messages: [
-      { role: "system", content: EXCALIDRAW_PROCESS_MAP_PROMPT },
-      { role: "user", content: userMessage },
-    ],
-    temperature: 0.3,
-    maxOutputTokens: 16384,
-  };
-
-  if (modelConfig.reasoningEffort) {
-    generateOptions.providerOptions = {
-      xai: { reasoningEffort: modelConfig.reasoningEffort },
-    };
-  }
-
-  console.log(`\x1b[32m[Grok API] editDiagramWithGrok using model: ${modelConfig.apiModelId}\x1b[0m`);
-  
-  // Use streaming with fullStream to capture both reasoning and text
-  const result = streamText(generateOptions);
-  
-  // Collect all text chunks from the stream
-  let content = "";
-  let inReasoning = false;
-  let inText = false;
-  
-  for await (const part of result.fullStream) {
-    // Handle reasoning chunks (thinking trace)
-    if (part.type === "reasoning-delta") {
-      if (!inReasoning) {
-        console.log("\x1b[33m[REASONING]\x1b[0m");
-        inReasoning = true;
-        inText = false;
-      }
-      process.stdout.write((part as any).text ?? "");
-    }
-    
-    // Handle text chunks (final response)
-    if (part.type === "text-delta") {
-      if (!inText) {
-        console.log("\x1b[32m[RESPONSE]\x1b[0m");
-        inText = true;
-        inReasoning = false;
-      }
-      const text = (part as any).text ?? "";
-      content += text;
-      process.stdout.write(text);
-    }
-  }
-
-  if (!content) {
-    throw new Error("No content in xAI API response");
-  }
-
-  // Strip markdown fences if present
-  let jsonStr = content.trim();
-  if (jsonStr.startsWith("```")) {
-    jsonStr = jsonStr.replace(/^```(?:json)?\n?/, "").replace(/\n?```$/, "");
-  }
-
-  const parsed = JSON.parse(jsonStr);
-
-  if (!parsed.summary || typeof parsed.summary !== "string") {
-    throw new Error("Response missing 'summary'");
-  }
-
-  const excalidraw = parsed.excalidraw;
-  if (!excalidraw || !Array.isArray(excalidraw.elements)) {
-    throw new Error("Response missing valid 'excalidraw.elements' array");
-  }
-  if (excalidraw.elements.length < 2) {
-    throw new Error("Updated Excalidraw scene must have at least 2 elements");
-  }
-
-  return {
-    summary: parsed.summary,
-    excalidraw: {
-      elements: excalidraw.elements,
-      appState: excalidraw.appState || {},
-      files: excalidraw.files || {},
-    },
-  };
-}
-
-/**
- * Extracts all use cases/processes discussed in a transcript.
- * Returns a list of use cases with their details for the user to select from.
- */
-export async function extractUseCasesFromTranscript(
-  transcript: string,
-  apiKey: string,
-  modelConfig: GrokModelConfig
-): Promise<ExtractUseCasesResult> {
-  const xai = createXai({ apiKey });
-
-  // Truncate very long transcripts to ~12K chars (~3K tokens)
-  const maxChars = 12000;
-  const truncated =
-    transcript.length > maxChars
-      ? transcript.slice(0, maxChars) + "\n\n[Transcript truncated for processing]"
-      : transcript;
-
-  const systemPrompt = `You are an expert at analyzing business conversations and identifying distinct use cases, processes, and workflows being discussed.
-
-Your job is to extract ALL distinct use cases, workflows, or processes mentioned in the transcript. For each use case, identify:
-1. A clear, concise title
-2. A brief description of what the process/use case is about
-3. Key details mentioned (steps, pain points, requirements, etc.)
-4. Participants involved (roles, teams, departments)
-5. Systems or tools mentioned
-
-Be thorough - capture every process or workflow discussed, even if only briefly mentioned.`;
-
-  const userMessage = `Analyze this transcript and extract ALL distinct use cases, processes, or workflows being discussed.
-
-Return your response as JSON in this exact format (return ONLY this JSON, nothing else):
-{
-  "transcriptSummary": "A 1-2 sentence summary of what this conversation was about overall",
-  "useCases": [
-    {
-      "id": "use-case-1",
-      "title": "Short descriptive title of the process/use case",
-      "description": "1-2 sentence description of what this process is about",
-      "details": [
-        "Specific detail or step mentioned",
-        "Pain point or challenge discussed",
-        "Requirement or goal mentioned"
-      ],
-      "participants": ["Role 1", "Team 2"],
-      "systems": ["System A", "Tool B"]
-    }
-  ]
-}
-
-Include at least 1 use case. If multiple processes are discussed, include all of them. Generate unique IDs like "use-case-1", "use-case-2", etc.
-
-Here is the transcript:
-
-${truncated}`;
-
-  // Build options — only include reasoningEffort when specified (multi-agent models)
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const generateOptions: any = {
-    model: xai.responses(modelConfig.apiModelId),
-    messages: [
-      { role: "system", content: systemPrompt },
-      { role: "user", content: userMessage },
-    ],
-    temperature: 0.3,
-    maxOutputTokens: 8192,
-  };
-
-  if (modelConfig.reasoningEffort) {
-    generateOptions.providerOptions = {
-      xai: { reasoningEffort: modelConfig.reasoningEffort },
-    };
-  }
-
-  console.log(`\x1b[32m[Grok API] extractUseCasesFromTranscript using model: ${modelConfig.apiModelId}\x1b[0m`);
-  
-  // Use streaming with fullStream to capture both reasoning and text
-  const result = streamText(generateOptions);
-  
-  // Collect all text chunks from the stream
-  let content = "";
-  let inReasoning = false;
-  let inText = false;
-  
-  for await (const part of result.fullStream) {
-    // Handle reasoning chunks (thinking trace)
-    if (part.type === "reasoning-delta") {
-      if (!inReasoning) {
-        console.log("\x1b[33m[REASONING]\x1b[0m");
-        inReasoning = true;
-        inText = false;
-      }
-      process.stdout.write((part as any).text ?? "");
-    }
-    
-    // Handle text chunks (final response)
-    if (part.type === "text-delta") {
-      if (!inText) {
-        console.log("\x1b[32m[RESPONSE]\x1b[0m");
-        inText = true;
-        inReasoning = false;
-      }
-      const text = (part as any).text ?? "";
-      content += text;
-      process.stdout.write(text);
-    }
-  }
-
-  if (!content) {
-    throw new Error("No content in xAI API response");
-  }
-
-  // Strip markdown fences if present
-  let jsonStr = content.trim();
-  if (jsonStr.startsWith("```")) {
-    jsonStr = jsonStr.replace(/^```(?:json)?\n?/, "").replace(/\n?```$/, "");
-  }
-
-  const parsed = JSON.parse(jsonStr);
-
-  // Validate the response
-  if (!parsed.useCases || !Array.isArray(parsed.useCases) || parsed.useCases.length === 0) {
-    throw new Error("Response missing valid 'useCases' array");
-  }
-
-  if (!parsed.transcriptSummary || typeof parsed.transcriptSummary !== "string") {
-    throw new Error("Response missing 'transcriptSummary'");
-  }
-
-  // Validate each use case
-  for (const uc of parsed.useCases) {
-    if (!uc.id || !uc.title || !uc.description) {
-      throw new Error("Each use case must have id, title, and description");
-    }
-    if (!Array.isArray(uc.details)) {
-      uc.details = [];
-    }
-  }
-
-  return {
-    useCases: parsed.useCases,
-    transcriptSummary: parsed.transcriptSummary,
-  };
+/** Creates an xAI provider instance with reasoning streaming enabled. */
+function createXaiWithReasoning(apiKey: string) {
+  return createXai({ apiKey, fetch: createReasoningFetch() });
 }
 
 // Stream event types
@@ -422,7 +55,7 @@ export type StreamEvent =
   | { type: "result"; data: ExtractUseCasesResult };
 
 /**
- * Streaming version of extractUseCasesFromTranscript.
+ * Extracts all use cases/processes discussed in a transcript via streaming.
  * Yields text and reasoning chunks as they arrive, then returns the final parsed result.
  */
 export async function* extractUseCasesFromTranscriptStream(
@@ -430,7 +63,7 @@ export async function* extractUseCasesFromTranscriptStream(
   apiKey: string,
   modelConfig: GrokModelConfig
 ): AsyncGenerator<StreamEvent> {
-  const xai = createXai({ apiKey });
+  const xai = createXaiWithReasoning(apiKey);
 
   const maxChars = 12000;
   const truncated =
@@ -497,28 +130,32 @@ ${truncated}`;
   
   const result = streamText(generateOptions);
   let content = "";
+  let reasoningChunks = 0;
+  let textChunks = 0;
   
   // Use fullStream to capture both text and reasoning
   for await (const part of result.fullStream) {
-    if (part.type === "reasoning-delta") {
-      // Reasoning chunks - use (part as any).text for the text content
+    if (part.type === "reasoning-start") {
+      console.log(`\x1b[33m[Reasoning started]\x1b[0m`);
+    } else if (part.type === "reasoning-delta") {
       const text = (part as any).text ?? "";
       if (text) {
+        reasoningChunks++;
+        if (reasoningChunks === 1) console.log(`\x1b[33m[Streaming reasoning chunks...]\x1b[0m`);
         yield { type: "reasoning", text };
       }
+    } else if (part.type === "reasoning-end") {
+      console.log(`\x1b[33m[Reasoning ended — ${reasoningChunks} chunks]\x1b[0m`);
     } else if (part.type === "text-delta") {
-      // Text chunks - use (part as any).text for the text content
       const text = (part as any).text ?? "";
       if (text) {
+        textChunks++;
         content += text;
         yield { type: "text", text };
       }
-    } else if (part.type === "reasoning-start") {
-      console.log(`\x1b[33m[Reasoning started]\x1b[0m`);
-    } else if (part.type === "reasoning-end") {
-      console.log(`\x1b[33m[Reasoning ended]\x1b[0m`);
     }
   }
+  console.log(`\x1b[32m[Stream complete] reasoning=${reasoningChunks} text=${textChunks}\x1b[0m`);
 
   if (!content) {
     throw new Error("No content in xAI API response");
@@ -558,158 +195,16 @@ ${truncated}`;
   };
 }
 
-/**
- * Generates a process map for a specific use case extracted from a transcript.
- * This provides more focused results by telling Grok exactly which process to map.
- */
-export async function parseTranscriptForUseCase(
-  transcript: string,
-  useCase: UseCase,
-  apiKey: string,
-  modelConfig: GrokModelConfig
-): Promise<GrokExcalidrawResult> {
-  const xai = createXai({ apiKey });
-
-  // Truncate very long transcripts to ~12K chars (~3K tokens)
-  const maxChars = 12000;
-  const truncated =
-    transcript.length > maxChars
-      ? transcript.slice(0, maxChars) + "\n\n[Transcript truncated for processing]"
-      : transcript;
-
-  const useCaseContext = `
-USE CASE TO MAP:
-Title: ${useCase.title}
-Description: ${useCase.description}
-${useCase.details.length > 0 ? `Key Details:\n${useCase.details.map(d => `- ${d}`).join('\n')}` : ''}
-${useCase.participants && useCase.participants.length > 0 ? `Participants: ${useCase.participants.join(', ')}` : ''}
-${useCase.systems && useCase.systems.length > 0 ? `Systems: ${useCase.systems.join(', ')}` : ''}
-`;
-
-  const userMessage = `Analyze this Gong sales-call transcript and generate a process map for THIS SPECIFIC USE CASE:
-
-${useCaseContext}
-
-Focus ONLY on mapping this specific process/use case. Extract the workflow steps, decision points, approvals, and handoffs related to this use case.
-
-Rules:
-- Map the prospect's CURRENT workflow (not the sales pitch or proposed solution)
-- Focus specifically on the use case described above
-- Include 8-20 steps for readability with concise labels
-- Capture sequential steps, decision points, approvals, and handoffs
-
-After you generate the Excalidraw JSON, wrap your entire response in this structure (return ONLY this JSON, nothing else):
-{
-  "title": "${useCase.title}",
-  "summary": "1-2 sentence summary of this specific process",
-  "excalidraw": <your full Excalidraw JSON object here>
-}
-
-Here is the transcript:
-
-${truncated}`;
-
-  // Build options — only include reasoningEffort when specified (multi-agent models)
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const generateOptions: any = {
-    model: xai.responses(modelConfig.apiModelId),
-    messages: [
-      { role: "system", content: EXCALIDRAW_PROCESS_MAP_PROMPT },
-      { role: "user", content: userMessage },
-    ],
-    temperature: 0.3,
-    maxOutputTokens: 16384,
-  };
-
-  if (modelConfig.reasoningEffort) {
-    generateOptions.providerOptions = {
-      xai: { reasoningEffort: modelConfig.reasoningEffort },
-    };
-  }
-
-  console.log(`\x1b[32m[Grok API] parseTranscriptForUseCase using model: ${modelConfig.apiModelId}\x1b[0m`);
-  
-  // Use streaming with fullStream to capture both reasoning and text
-  const result = streamText(generateOptions);
-  
-  // Collect all text chunks from the stream
-  let content = "";
-  let inReasoning = false;
-  let inText = false;
-  
-  for await (const part of result.fullStream) {
-    // Handle reasoning chunks (thinking trace)
-    if (part.type === "reasoning-delta") {
-      if (!inReasoning) {
-        console.log("\x1b[33m[REASONING]\x1b[0m");
-        inReasoning = true;
-        inText = false;
-      }
-      process.stdout.write((part as any).text ?? "");
-    }
-    
-    // Handle text chunks (final response)
-    if (part.type === "text-delta") {
-      if (!inText) {
-        console.log("\x1b[32m[RESPONSE]\x1b[0m");
-        inText = true;
-        inReasoning = false;
-      }
-      const text = (part as any).text ?? "";
-      content += text;
-      process.stdout.write(text);
-    }
-  }
-
-  if (!content) {
-    throw new Error("No content in xAI API response");
-  }
-
-  // Strip markdown fences if present
-  let jsonStr = content.trim();
-  if (jsonStr.startsWith("```")) {
-    jsonStr = jsonStr.replace(/^```(?:json)?\n?/, "").replace(/\n?```$/, "");
-  }
-
-  const parsed = JSON.parse(jsonStr);
-
-  // ---- Validate the wrapper ----
-  if (!parsed.title || typeof parsed.title !== "string") {
-    throw new Error("Response missing 'title'");
-  }
-  if (!parsed.summary || typeof parsed.summary !== "string") {
-    throw new Error("Response missing 'summary'");
-  }
-
-  // ---- Validate the Excalidraw payload ----
-  const excalidraw = parsed.excalidraw;
-  if (!excalidraw || !Array.isArray(excalidraw.elements)) {
-    throw new Error("Response missing valid 'excalidraw.elements' array");
-  }
-  if (excalidraw.elements.length < 2) {
-    throw new Error("Excalidraw scene must have at least 2 elements");
-  }
-
-  return {
-    title: parsed.title,
-    summary: parsed.summary,
-    excalidraw: {
-      elements: excalidraw.elements,
-      appState: excalidraw.appState || {},
-      files: excalidraw.files || {},
-    },
-  };
-}
-
 // ============== STREAMING GENERATORS ==============
 
 // Stream event types for diagram editing
 export type EditStreamEvent = 
+  | { type: "text"; text: string }
   | { type: "reasoning"; text: string }
   | { type: "result"; data: { excalidraw: ExcalidrawScene; summary: string } };
 
 /**
- * Streaming version of editDiagramWithGrok.
+ * Edits an existing Excalidraw diagram given a natural-language instruction via streaming.
  */
 export async function* editDiagramWithGrokStream(
   currentExcalidraw: ExcalidrawScene,
@@ -717,7 +212,7 @@ export async function* editDiagramWithGrokStream(
   apiKey: string,
   modelConfig: GrokModelConfig
 ): AsyncGenerator<EditStreamEvent> {
-  const xai = createXai({ apiKey });
+  const xai = createXaiWithReasoning(apiKey);
 
   const currentJson = JSON.stringify({
     type: "excalidraw", version: 2, source: "https://excalidraw.com",
@@ -736,16 +231,24 @@ export async function* editDiagramWithGrokStream(
   };
   if (modelConfig.reasoningEffort) opts.providerOptions = { xai: { reasoningEffort: modelConfig.reasoningEffort } };
 
+  console.log(`\x1b[32m[Grok API] editDiagramWithGrokStream using model: ${modelConfig.apiModelId}\x1b[0m`);
   const result = streamText(opts);
   let content = "";
+  let reasoningChunks = 0;
   for await (const part of result.fullStream) {
-    if (part.type === "reasoning-delta") {
+    if (part.type === "reasoning-start") {
+      console.log(`\x1b[33m[Edit reasoning started]\x1b[0m`);
+    } else if (part.type === "reasoning-delta") {
       const t = (part as any).text ?? "";
-      if (t) yield { type: "reasoning", text: t };
+      if (t) { reasoningChunks++; yield { type: "reasoning", text: t }; }
+    } else if (part.type === "reasoning-end") {
+      console.log(`\x1b[33m[Edit reasoning ended — ${reasoningChunks} chunks]\x1b[0m`);
     } else if (part.type === "text-delta") {
-      content += (part as any).text ?? "";
+      const t = (part as any).text ?? "";
+      if (t) { content += t; yield { type: "text", text: t }; }
     }
   }
+  console.log(`\x1b[32m[Edit stream complete] reasoning=${reasoningChunks}\x1b[0m`);
   if (!content) throw new Error("No content");
   let js = content.trim();
   if (js.startsWith("```")) js = js.replace(/^```(?:json)?\n?/, "").replace(/\n?```$/, "");
@@ -756,11 +259,12 @@ export async function* editDiagramWithGrokStream(
 
 // Stream event types for process map generation
 export type ProcessMapStreamEvent = 
+  | { type: "text"; text: string }
   | { type: "reasoning"; text: string }
   | { type: "result"; data: GrokExcalidrawResult };
 
 /**
- * Streaming version of parseTranscriptForUseCase.
+ * Generates a process map for a specific use case from a transcript via streaming.
  */
 export async function* parseTranscriptForUseCaseStream(
   transcript: string,
@@ -768,7 +272,7 @@ export async function* parseTranscriptForUseCaseStream(
   apiKey: string,
   modelConfig: GrokModelConfig
 ): AsyncGenerator<ProcessMapStreamEvent> {
-  const xai = createXai({ apiKey });
+  const xai = createXaiWithReasoning(apiKey);
   const maxChars = 12000;
   const truncated = transcript.length > maxChars ? transcript.slice(0, maxChars) + "\n\n[Truncated]" : transcript;
   const ctx = `USE CASE: ${useCase.title}\n${useCase.description}\n${useCase.details.map(d => `- ${d}`).join('\n')}`;
@@ -782,16 +286,24 @@ export async function* parseTranscriptForUseCaseStream(
   };
   if (modelConfig.reasoningEffort) opts.providerOptions = { xai: { reasoningEffort: modelConfig.reasoningEffort } };
 
+  console.log(`\x1b[32m[Grok API] parseTranscriptForUseCaseStream using model: ${modelConfig.apiModelId}\x1b[0m`);
   const result = streamText(opts);
   let content = "";
+  let reasoningChunks = 0;
   for await (const part of result.fullStream) {
-    if (part.type === "reasoning-delta") {
+    if (part.type === "reasoning-start") {
+      console.log(`\x1b[33m[Map reasoning started]\x1b[0m`);
+    } else if (part.type === "reasoning-delta") {
       const t = (part as any).text ?? "";
-      if (t) yield { type: "reasoning", text: t };
+      if (t) { reasoningChunks++; yield { type: "reasoning", text: t }; }
+    } else if (part.type === "reasoning-end") {
+      console.log(`\x1b[33m[Map reasoning ended — ${reasoningChunks} chunks]\x1b[0m`);
     } else if (part.type === "text-delta") {
-      content += (part as any).text ?? "";
+      const t = (part as any).text ?? "";
+      if (t) { content += t; yield { type: "text", text: t }; }
     }
   }
+  console.log(`\x1b[32m[Map stream complete] reasoning=${reasoningChunks}\x1b[0m`);
   if (!content) throw new Error("No content");
   let js = content.trim();
   if (js.startsWith("```")) js = js.replace(/^```(?:json)?\n?/, "").replace(/\n?```$/, "");

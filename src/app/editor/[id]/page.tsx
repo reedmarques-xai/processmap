@@ -5,7 +5,7 @@ import { useRouter, useParams } from "next/navigation";
 import { ArrowLeft, Download, Check, Pencil, MessageSquare, PanelRightClose } from "lucide-react";
 import ProcessMapViewer from "@/components/process-map-editor";
 import EditChat from "@/components/edit-chat";
-import { getSavedMap, updateMapTitle, updateMapExcalidraw } from "@/lib/storage";
+import { getSavedMap, updateMapTitle, updateMapVersions } from "@/lib/storage";
 import { SavedMap, DiagramVersion, ExcalidrawScene } from "@/lib/types";
 import { downloadFile } from "@/lib/utils";
 
@@ -41,16 +41,22 @@ export default function EditorPage() {
     setMap(savedMap);
     setTitleValue(savedMap.title);
 
-    // Seed v1 from the saved data
-    const v1: DiagramVersion = {
-      version: 1,
-      label: "v1 — Original",
-      excalidrawData: savedMap.excalidrawData,
-      timestamp: savedMap.createdAt,
-    };
-    setVersions([v1]);
-    versionsRef.current = [v1];
-    setCurrentVersion(1);
+    // Restore saved versions, or create v1 from excalidrawData for backward compat
+    if (savedMap.versions && savedMap.versions.length > 0) {
+      setVersions(savedMap.versions);
+      versionsRef.current = savedMap.versions;
+      setCurrentVersion(savedMap.versions.length);
+    } else {
+      const v1: DiagramVersion = {
+        version: 1,
+        label: "v1 — Original",
+        excalidrawData: savedMap.excalidrawData,
+        timestamp: savedMap.createdAt,
+      };
+      setVersions([v1]);
+      versionsRef.current = [v1];
+      setCurrentVersion(1);
+    }
     setLoading(false);
   }, [id, router]);
 
@@ -59,10 +65,29 @@ export default function EditorPage() {
     versionsRef.current = versions;
   }, [versions]);
 
+  // ── Streaming state for live diagram preview during edits ──
+  const [isEditStreaming, setIsEditStreaming] = useState(false);
+  const [streamingScene, setStreamingScene] = useState<ExcalidrawScene | null>(null);
+
+  const handleStreamingElements = useCallback((elements: Record<string, unknown>[]) => {
+    setStreamingScene({ elements, appState: {}, files: {} });
+  }, []);
+
+  const handleStreamingStateChange = useCallback((streaming: boolean) => {
+    setIsEditStreaming(streaming);
+    if (!streaming) {
+      // Clear the streaming preview when done — the final result will come via onNewVersion
+      setStreamingScene(null);
+    }
+  }, []);
+
   // ── Derive the scene that should be displayed ──
+  // During streaming, show the in-progress scene; otherwise show the selected version
   const displayedScene: ExcalidrawScene =
-    versions.find((v) => v.version === currentVersion)?.excalidrawData ||
-    map?.excalidrawData || { elements: [] };
+    (isEditStreaming && streamingScene)
+      ? streamingScene
+      : (versions.find((v) => v.version === currentVersion)?.excalidrawData ||
+         map?.excalidrawData || { elements: [] });
 
   // ── Called by chat to get the scene it should send to the API ──
   const getCurrentScene = useCallback((): ExcalidrawScene => {
@@ -80,12 +105,13 @@ export default function EditorPage() {
         excalidrawData: scene,
         timestamp: new Date().toISOString(),
       };
-      setVersions((prev) => [...prev, newVersion]);
+      const updatedVersions = [...versionsRef.current, newVersion];
+      setVersions(updatedVersions);
       setCurrentVersion(nextNum);
 
-      // Persist the latest version to localStorage
+      // Persist all versions to localStorage
       if (map) {
-        updateMapExcalidraw(map.id, scene);
+        updateMapVersions(map.id, updatedVersions);
       }
     },
     [map]
@@ -223,7 +249,7 @@ export default function EditorPage() {
       <div className="flex-1 flex min-h-0 overflow-hidden">
         {/* Diagram viewer — always fills remaining space */}
         <main className="flex-1 h-full min-w-0">
-          <ProcessMapViewer sceneData={displayedScene} />
+          <ProcessMapViewer sceneData={displayedScene} isStreaming={isEditStreaming} />
         </main>
 
         {/* Edit chat sidebar — slides in/out */}
@@ -238,6 +264,8 @@ export default function EditorPage() {
               onVersionChange={setCurrentVersion}
               getCurrentScene={getCurrentScene}
               onNewVersion={handleNewVersion}
+              onStreamingElements={handleStreamingElements}
+              onStreamingStateChange={handleStreamingStateChange}
             />
           </div>
         </aside>

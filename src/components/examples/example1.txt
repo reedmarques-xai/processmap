@@ -1,0 +1,106 @@
+Transcript 1: ACME Bank – Overhauling Customer Support with xAI Voice Agent API
+Discovery Call Recording
+Simulated Date: March 2026
+Duration: ~52 minutes
+Participants: Alex Rivera (Senior Enterprise Sales Engineer, xAI) and Sarah Chen (VP Customer 
+Experience, ACME Bank)
+[00:00] Alex Rivera (xAI): Hi Sarah, Alex Rivera from xAI. Thanks for making the time today. To get 
+us started, could you give me the high-level overview of your current customer support operations 
+at ACME Bank, particularly where voice fits into the omnichannel mix and what major initiatives 
+you're focused on this year?
+[00:55] Sarah Chen (VP Customer Experience, ACME Bank): Sure, Alex. ACME Bank manages $1.2 trillion 
+in assets and serves 15.7 million customers. Voice is still our dominant channel — we handle 
+approximately 1.18 million inbound voice interactions per month, representing about 62% of total 
+support volume. We run a complex hybrid contact center environment: the majority sits on Genesys 
+Cloud CX hosted in AWS us-east-1, but we maintain a significant on-premises Avaya Aura 8.1 
+deployment for high-net-worth private banking and wealth management clients due to strict data 
+residency and security policies. We also leverage Five9 for overflow routing and after-hours 
+coverage.
+Upstream, calls arrive through 18 different toll-free numbers plus in-app callbacks from our mobile 
+banking app. The IVR layer uses Genesys Voice Platform combined with legacy Nuance speech 
+recognition. Authentication is multi-factor: device fingerprint + account number/PIN or voice 
+biometrics (we piloted NICE Real-time Authentication but only hit 68% success rate on production 
+traffic). Once authenticated, customer data is pulled in real-time from our core banking system — 
+FIS Profile running on IBM z15 mainframe with DB2 databases. Intent classification is still 70% 
+rules-based with limited ML augmentation through a custom Google Dialogflow CX model. We see 
+massive volume spikes on Mondays and after major market events.
+[03:40] Alex Rivera (xAI): That’s very helpful context on the hybrid architecture. Can you walk me
+through the agent experience once a call is routed? What systems do they actually use during live 
+conversations?
+[04:25] Sarah Chen: The agent desktop experience is quite fragmented, which is one of our biggest 
+pain points. The primary interface is Salesforce Service Cloud Enterprise with a custom Genesys 
+Open CTI integration for screen pops. But agents routinely toggle between seven different systems 
+during a single call: FIS core banking via IBM MQSeries middleware, FICO Falcon fraud engine, TSYS 
+card management, ServiceNow knowledge base, a separate Reg E compliance logging tool, our internal 
+wire transfer system, and occasionally the legacy AS/400 for older loan products.
+Context switching is brutal. Average handle time sits at 9.4 minutes (retail banking 7.8 min, 
+wealth management 14.2 min). We currently employ 2,450 agents across four U.S. centers and one 
+large nearshore operation in Mexico. We have specialized queues for fraud disputes, wires, and 
+high-net-worth relationship banking. Screen pop latency sometimes hits 2.8 seconds during peak 
+load, which frustrates both agents and customers.
+[07:10] Alex Rivera (xAI): I can see how that creates real friction. How do you handle escalations 
+and complex cases that require multiple departments or back-office involvement?
+[08:05] Sarah Chen: Escalations happen on roughly 18% of calls. We use Genesys Workforce Management 
+routing rules, but warm transfers often require the original agent to stay on the line while 
+conferencing in specialists. For non-real-time escalations, we create Salesforce cases that trigger 
+email and Slack notifications to back-office teams. The back office itself runs on a mix of 
+mainframe batch jobs and some newer Java Spring Boot microservices deployed on Azure Kubernetes 
+Service. Handoffs frequently result in duplicated effort and data entry errors. Our repeat call 
+rate within 48 hours is currently 14.7%, and first-contact resolution sits at 71%.
+[10:30] Alex Rivera (xAI): Understood. Let’s shift to post-call processes. What happens to 
+recordings, transcripts, metadata, and outcomes once the call ends?
+[11:15] Sarah Chen: Post-call processing is sophisticated but operationally heavy. Every call is 
+recorded and stored via NICE CXone with immutable storage in AWS S3 for seven years to meet 
+regulatory retention. We run a real-time streaming pipeline using Apache Kafka with multiple 
+topics: call-metadata, transcripts, disposition-codes, fraud-events, and compliance-audit. 
+Transcripts are generated using Speechmatics as primary with Amazon Transcribe fallback and a 
+fine-tuned Whisper model trained on banking jargon.
+This data feeds into a multi-stage ETL/ELT pipeline orchestrated by Apache Airflow running on 
+Amazon EKS. Fivetran handles initial extraction from Genesys and Salesforce, Spark jobs on EMR 
+perform PII redaction using custom regex + NER models, followed by dbt transformations in 
+Snowflake. The final modeled data lands in our enterprise data warehouse and is consumed by Tableau 
+for VoC dashboards, Databricks for churn propensity and next-best-action ML models, and automated 
+regulatory feeds for the OCC and CFPB. We process 48–62 TB of call-related data monthly. Latency 
+ranges from 45 minutes for priority streams to 14 hours for full reconciliation batches. Error 
+handling includes dead-letter queues and automated reprocessing with detailed audit logs.
+[16:40] Alex Rivera (xAI): Extremely detailed — thank you. How do real-time fraud and risk checks 
+work during the call, and what compliance processes are layered on top?
+[17:30] Sarah Chen: During the call, we make synchronous calls to FICO Falcon through a dedicated 
+low-latency API gateway. High-risk actions trigger an agent whisper and potential call hold. 
+Post-call, high-value interactions undergo mandatory compliance review — currently 6.2% manual 
+sampling plus rules-based automation. We maintain full chain-of-custody for every recording and 
+transcript under FINRA, GLBA, PCI-DSS, and CFPB rules. All data must remain in U.S. regions. We 
+also run quarterly SOC2 and PCI audits that require extensive documentation from every system 
+involved.
+[20:15] Alex Rivera (xAI): How are knowledge bases managed today, and what challenges do agents 
+face when searching for information mid-call?
+[21:05] Sarah Chen: Knowledge is scattered across Salesforce Knowledge, ServiceNow, and an aging 
+internal Confluence wiki. Agents lose significant time searching — we estimate 90–120 seconds pe
+complex call. We attempted to unify this with a custom semantic search layer using Elasticsearch, 
+but accuracy remains inconsistent, especially for regulatory nuances.
+[23:40] Alex Rivera (xAI): Can you share more about your current AI and chatbot initiatives and why 
+they haven’t fully reduced voice volume?
+[24:30] Sarah Chen: We have basic Einstein bots in Salesforce and a Dialogflow CX voice bot, but 
+they only handle 22% of interactions successfully. They struggle with context carryover, complex 
+banking products, and regulatory language. Customers frequently get frustrated and request human 
+escalation, which actually increases overall handle time due to context loss.
+[27:10] Alex Rivera (xAI): What does monitoring, alerting, and scaling look like for these systems 
+during peak periods?
+[28:00] Sarah Chen: We use Datadog for infrastructure monitoring, New Relic for application 
+performance, and Prometheus/Grafana for custom metrics. Peak Monday mornings can hit 78,000 calls. 
+Auto-scaling in Genesys Cloud works reasonably well, but our mainframe backend and MQ middleware 
+become bottlenecks. We still maintain a 24/7 command center with 12 dedicated operations staff.
+[31:20] Alex Rivera (xAI): Finally, could you give me a sense of the total cost structure and 
+headcount supporting this entire platform?
+[32:05] Sarah Chen: Annual spend exceeds $87 million — licensing, infrastructure, headcount, and 
+compliance overhead. We have 2,450 agents, 180 supervisors, 45 people in our contact center 
+technology and analytics team, plus external consulting for regulatory audits. Technical debt from 
+the hybrid setup is costing us significantly in maintenance and talent acquisition.
+[35:40] Alex Rivera (xAI): Sarah, I’ve captured an extremely comprehensive picture of your current
+state — the hybrid Genesys/Avaya IVR and ACD, multi-system agent desktop with heavy context 
+switching, sophisticated Kafka + Airflow + Spark + Snowflake post-call pipeline, strict compliance 
+and data residency requirements, current AHT/CSAT metrics, and the limitations of your existing AI 
+attempts. xAI’s Voice Agent API is specifically engineered for secure, real-time tool calling 
+against core systems like FIS while preserving full auditability. Would you be open to a technical 
+architecture workshop next week and potentially a targeted POC on one of your highest-volume queues?
+[39:15] Sarah Chen: Yes, that makes a lot of sense. Let’s get that scheduled.

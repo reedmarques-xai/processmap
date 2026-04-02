@@ -31,27 +31,57 @@ Every response must be a JSON object with this exact top-level shape:
 
 ## Scope Rules — What Belongs in the Diagram
 
-**Only capture business-relevant process steps.** Before generating, mentally filter the input:
+**Capture exhaustive, implementation-level detail.** The goal is to produce a process map so thorough
+that an autonomous system could recreate the entire end-to-end process from scratch — with zero
+additional context. Before generating, extract every actionable detail from the input:
 
-- Include: named actions performed by a person or system, decision points, handoffs between roles/systems, approvals or rejections, subflows that represent a distinct sub-process within the use case
-- Exclude: implementation details (e.g. "the database saves a row"), technical internals, UI micro-interactions, logging/audit steps unless they are an explicit business requirement, steps that are implied by adjacent steps (e.g. don't add "Open browser" before "Log in")
+- Include: every named action performed by a person or system, decision points, handoffs between
+  roles/systems, approvals or rejections, subflows that represent a distinct sub-process within the
+  use case
+- Include: data connectors and data sources (databases, APIs, data lakes, file shares, spreadsheets),
+  specifying what data flows in and out of each step
+- Include: inputs and outputs for every step — what is consumed and what is produced (documents,
+  data payloads, notifications, reports, artifacts)
+- Include: systems, platforms, and tools involved at each step (CRMs, ERPs, cloud services, internal
+  tools, SaaS products) — name them explicitly
+- Include: integrations between systems — how data moves (API calls, webhooks, file drops, ETL
+  pipelines, message queues, manual copy-paste)
+- Include: operating environment details when mentioned — operating systems, deployment targets,
+  infrastructure (cloud vs on-prem), environments (dev/staging/prod)
+- Include: manual review steps, human-in-the-loop checkpoints, approval gates, QA checks — who
+  performs them, what criteria they evaluate, and what happens on pass vs fail
+- Include: triggers that initiate steps — scheduled (cron, daily, weekly), event-driven (webhook,
+  file arrival, form submission, email receipt), manual (button click, request)
+- Include: error handling and fallback paths — what happens when a step fails, retry logic,
+  escalation procedures, timeout behaviors
+- Include: authentication and access control when mentioned — who has access, what credentials or
+  roles are required, SSO/OAuth flows
+- Include: timing and SLA information — expected durations, deadlines, time constraints between steps
+- Exclude only: purely cosmetic UI details (button colors, font choices), boilerplate implied by
+  every software process (e.g. "turn on computer"), and conversation filler that adds no process
+  information
 
-**One use case = one diagram.** If the input describes multiple independent use cases, generate one diagram for the primary use case only. Do not attempt to merge unrelated flows into a single diagram.
+**One use case = one diagram.** If the input describes multiple independent use cases, generate one
+diagram for the primary use case only. Do not attempt to merge unrelated flows into a single diagram.
 
-**Subflows capture sub-detail, not noise.** Add a vertical subflow beneath a step only when:
-- The step has 2 or more meaningful sub-actions that a business stakeholder would care about
-- The sub-actions have a defined sequence or branching logic
+**Subflows capture implementation detail.** Add a vertical subflow beneath a step when:
+- The step has 2 or more meaningful sub-actions that specify HOW the step is executed
+- The sub-actions reveal data flow, system interactions, integrations, or manual review procedures
+- The sub-actions name specific tools, connectors, APIs, file formats, or data transformations
 - The sub-actions are not simply restatements of the parent step
 
-If a step is atomic (one clear action), do not create a subflow for it.
+If a step is truly atomic with no further detail available, do not create a subflow for it — but
+actively look for implied sub-detail. If a step says "send data to CRM," the subflow should capture
+what data, what CRM, what API/integration method, and any validation or transformation applied.
 
 **Balance substeps evenly across main steps.** Aim for a consistent level of detail:
 - If you add substeps to some main steps, look for opportunities to add similar depth to others
 - Avoid having one step with 4+ substeps while adjacent steps have zero — redistribute detail
-- Target 1-3 substeps per main step when substeps are warranted; avoid extremes (0 vs 5+)
+- Target 2-4 substeps per main step when substeps are warranted; favor more detail over less
 - If a step has many substeps, consider promoting some to main-flow steps instead
 - If a step has no substeps but others do, consider whether it can be broken down further
-- The goal is visual balance: the diagram should not be lopsided with depth concentrated in one area
+- The goal is visual balance AND completeness: the diagram should be detailed enough that someone
+  unfamiliar with the process could execute it end-to-end using only the diagram
 
 ---
 
@@ -85,10 +115,15 @@ For legibility purposes, try to make the diagram as close to a square as possibl
 Think carefully about when something should be a next major step vs a substep of a previous step. This 
 will contribute to a more naturally square structure. But do not force this structure if the process does not call for it.
 
+**Favor depth of detail.** When in doubt about whether to include a detail, include it. An overly
+detailed diagram is far more valuable than an oversimplified one. Every substep should name the
+specific system, data format, integration method, or review criteria involved — never use vague
+labels like "Process Data" when you can say "Transform CSV via\\nPython ETL Script."
+
 **Even distribution of complexity:** When analyzing a process, distribute substeps evenly across the main flow:
 - Count how many substeps each main step could have, then normalize — don't let one step dominate
 - If the transcript gives more detail about one step, synthesize similar detail for others where reasonable
-- A balanced diagram (e.g., 5 main steps each with 2 substeps) is preferable to an unbalanced one (e.g., 1 step with 6 substeps, 4 steps with 0)
+- A balanced diagram (e.g., 5 main steps each with 3 substeps) is preferable to an unbalanced one (e.g., 1 step with 6 substeps, 4 steps with 0)
 
 ---
 
@@ -395,33 +430,48 @@ Apply one consistent palette across all elements. Do not mix palettes.
 
 ## Step-by-Step Generation Process
 
-1. Scope the use case — identify only business-relevant steps. Filter out technical internals,
-   implied steps, and out-of-scope sub-processes.
-2. Identify subflows — does each main step have 2+ meaningful sub-actions? If not, keep it atomic.
-3. Balance substeps — review the substep distribution across all main steps. Redistribute if one step
-   has 4+ substeps while others have 0. Aim for 1-3 substeps per step when substeps are used.
-4. Assign step numbers — number main steps sequentially (1, 2, 3…), substeps as parent.sub (1.1, 1.2…).
+1. Extract ALL detail — scan the input for every system, tool, data source, integration, trigger,
+   manual review, approval gate, input/output, timing constraint, error path, and credential/access
+   requirement mentioned. List them before proceeding. The goal is a diagram so detailed an
+   autonomous system could rebuild the entire process from it alone.
+2. Scope the use case — organize extracted details into a single coherent process flow. Filter out
+   only conversation filler and cosmetic UI details. Keep everything that describes WHAT happens,
+   HOW it happens, WHAT systems are involved, and WHAT data flows between them.
+3. Identify subflows — for each main step, identify sub-actions that reveal implementation detail:
+   data connectors, API calls, specific tools, manual review criteria, transformation logic,
+   trigger conditions. Target 2-4 substeps per main step. If a step says "process data," break it
+   into the specific extraction, transformation, validation, and loading sub-steps.
+4. Balance substeps — review the substep distribution across all main steps. Redistribute if one step
+   has 5+ substeps while others have 0. Favor more detail over less — it's better to over-specify
+   than to leave gaps an autonomous system couldn't fill.
+5. Assign step numbers — number main steps sequentially (1, 2, 3…), substeps as parent.sub (1.1, 1.2…).
    Do not number start/end diamonds.
-5. Plan the layout — count main-flow nodes, calculate X positions, calculate Y for each subflow depth.
-6. Size shapes — determine label length per step (including number prefix), calculate required
+6. Plan the layout — count main-flow nodes, calculate X positions, calculate Y for each subflow depth.
+7. Size shapes — determine label length per step (including number prefix), calculate required
    width/height, ensure no overflow.
-7. Assign IDs — create unique IDs for every shape, text, and arrow before writing JSON.
-8. Generate shapes — correct position, size, color, pre-populated boundElements.
-9. Generate text — use the exact centering formula. x and y must be computed values, not guesses.
-   Include the step number prefix in every label (e.g. "1. Step Name", "1.1 Sub-step Name").
-10. Generate arrows — correct points, startBinding, endBinding. Width/height = actual pixel distance.
-11. Validate — run the full checklist below.
-12. Output — return only the complete JSON object. No other text.
+8. Assign IDs — create unique IDs for every shape, text, and arrow before writing JSON.
+9. Generate shapes — correct position, size, color, pre-populated boundElements.
+10. Generate text — use the exact centering formula. x and y must be computed values, not guesses.
+    Include the step number prefix in every label (e.g. "1. Step Name", "1.1 Sub-step Name").
+    Labels should name specific systems, data types, and actions — not vague descriptions.
+11. Generate arrows — correct points, startBinding, endBinding. Width/height = actual pixel distance.
+12. Validate — run the full checklist below.
+13. Output — return only the complete JSON object. No other text.
 
 ---
 
 ## Critical Validation Checklist
 
-Scope:
-  [ ] Only business-relevant steps included — no technical internals or implied steps
-  [ ] Subflows exist only for steps with 2+ meaningful, sequential sub-actions
+Scope & Detail:
+  [ ] All systems, tools, data sources, and integrations mentioned in the input are represented
+  [ ] Every step specifies its trigger, inputs, outputs, and the system/person performing it
+  [ ] Data connectors and integration methods are captured (API, webhook, file drop, manual, etc.)
+  [ ] Manual review steps include who reviews and what criteria they evaluate
+  [ ] Error/fallback paths are included where mentioned
+  [ ] The diagram is detailed enough for an autonomous system to recreate the process from scratch
+  [ ] Subflows exist for steps with implementation detail (data flow, tools, review criteria)
   [ ] Diagram represents a single use case
-  [ ] Substeps are distributed evenly — no step has 4+ substeps while others have 0
+  [ ] Substeps are distributed evenly — no step has 5+ substeps while others have 0
 
 Step Numbering:
   [ ] Every main-flow step (rectangle/ellipse, not start/end diamonds) has a sequential number prefix (1, 2, 3…)

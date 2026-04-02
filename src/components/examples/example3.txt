@@ -1,0 +1,68 @@
+LegacyCorp – Modernizing Legacy Back-Office Workflows
+Discovery Call Recording
+Simulated Date: March 2026
+Duration: ~51 minutes
+Participants: Alex Rivera (Senior Enterprise Sales Engineer, xAI) and Priya Patel (CIO, LegacyCorp)
+[00:00] Alex Rivera (xAI): Hi Priya, Alex Rivera from xAI. Thank you for the time. Could you start 
+with an overview of your current back-office operations and the legacy systems supporting 
+invoicing, procurement, HR, and compliance at LegacyCorp?
+[00:55] Priya Patel (CIO, LegacyCorp): Certainly. LegacyCorp is a large manufacturing and specialty 
+insurance organization with decades of technical debt. Our core back-office systems run on IBM z/OS 
+mainframe using COBOL and CICS applications with DB2 databases. The ERP layer is still SAP ECC 6.0 
+(we have not yet migrated to S/4HANA). We process accounts payable/receivable, procurement, HR 
+onboarding/payroll, and insurance claims through this environment.
+Most processes remain batch-oriented. Nightly JCL jobs and Informatica PowerCenter ETLs move data 
+between mainframe and our Oracle data warehouse. We use heavy file-based transfers via SFTP and 
+some custom APIs layered on over the years. We’ve added UiPath RPA bots to 45 processes to reduce 
+manual Excel and email work, but they are fragile and require constant maintenance.
+[04:10] Alex Rivera (xAI): Helpful context. Could you walk me through a complete end-to-end example 
+— say, invoice processing — including upstream sources and downstream impacts?
+[05:05] Priya Patel: Invoice processing starts with vendors sending PDFs via email or EDI 810 
+transactions. Files land in a staging server, go through ABBYY FlexiCapture OCR, then either manual 
+validation or UiPath bots push data into the mainframe COBOL matching programs against purchase 
+orders stored in SAP ECC. Approved invoices trigger nightly batch payment runs via banking 
+integration. Downstream, data flows to financial reporting in Tableau, audit archives, and our 
+Oracle data warehouse. The full cycle averages 3–5 business days. We have 18 full-time staff just 
+in reconciliation. Annual mainframe MIPS costs exceed $4.1 million.
+[09:20] Alex Rivera (xAI): How are these workflows orchestrated today, and what are the biggest 
+integration and reliability challenges?
+[10:10] Priya Patel: Orchestration is primarily scheduled batch with limited event-driven triggers 
+via IBM MQ. Integrations are mostly point-to-point file drops and custom middleware. We experience 
+frequent failures during peak periods (month-end, quarter-close) requiring manual intervention. 
+Error rates on RPA bots average 8.4% and require dedicated maintenance teams.
+[13:40] Alex Rivera (xAI): Can you describe the team structures, handoffs, and organizational 
+processes supporting these systems?
+[14:30] Priya Patel: We have a mainframe COBOL team of 22 developers (average age 57), an SAP basis 
+and functional team of 18, an RPA Center of Excellence with 9 people, and integration specialists. 
+Handoffs between finance, procurement, HR, and IT create significant delays. Knowledge transfer is 
+becoming critical as senior staff approach retirement.
+[18:05] Alex Rivera (xAI): What compliance and governance requirements are most burdensome in these 
+processes?
+[18:55] Priya Patel: SOX, GDPR for HR data, and industry-specific insurance regulations require 
+immutable audit logs, strict change control, and extensive documentation. Every modification to 
+mainframe programs or SAP configurations goes through 6-week testing cycles. Data residency and 
+encryption requirements further complicate modernization.
+[22:30] Alex Rivera (xAI): How have previous modernization or automation attempts gone, and what 
+were the main obstacles?
+[23:20] Priya Patel: We attempted a large SAP S/4HANA migration in 2023 that was paused due to risk 
+and cost. RPA expansion has plateaued because bots break whenever SAP screens or mainframe green 
+screens change. Custom microservices on Azure have helped some peripheral processes but can’t touc
+the core transactional systems safely.
+[27:40] Alex Rivera (xAI): What monitoring, alerting, and disaster recovery processes exist for 
+these legacy systems?
+[28:30] Priya Patel: We use IBM Tivoli and some modern overlays like Splunk for logging. Disaster 
+recovery involves weekly mainframe backups and a hot site. Alerting is still largely manual during 
+batch windows. Scaling is impossible without significant hardware upgrades.
+[32:10] Alex Rivera (xAI): Can you give me a sense of the total annual cost and pain associated 
+with maintaining these legacy workflows?
+[33:00] Priya Patel: Combined mainframe, SAP, and RPA maintenance exceeds $28 million annually, 
+plus the opportunity cost of slow cycle times impacting cash flow and employee experience. Talent 
+acquisition for COBOL and ECC skills has become extremely expensive.
+[37:20] Alex Rivera (xAI): Priya, I now have a very clear and detailed map of your current 
+environment — the mainframe COBOL/DB2 core, SAP ECC batch processes, Informatica ETL, UiPath RPA 
+layer, file-based integrations, heavy compliance overhead, high maintenance costs, and critical 
+talent risks. xAI’s agentic AI capabilities are designed to securely orchestrate and modernize 
+exactly these legacy-to-modern transitions with tool calling across systems while maintaining 
+auditability. Would you be open to a deep-dive architecture review and a small proof-of-concept on 
+one of your highest-pain processes like invoice matching or procurement?
+[41:15] Priya Patel: Yes. This is worth exploring. Let’s schedule the workshop.

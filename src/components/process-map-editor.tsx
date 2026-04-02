@@ -6,13 +6,15 @@ import { ExcalidrawScene } from "@/lib/types";
 
 interface ProcessMapViewerProps {
   sceneData: ExcalidrawScene;
+  /** When true, the diagram is being built element-by-element. Suppresses auto-fit. */
+  isStreaming?: boolean;
 }
 
 const MIN_SCALE = 0.1;
 const MAX_SCALE = 5;
 const ZOOM_STEP = 0.025;
 
-export default function ProcessMapViewer({ sceneData }: ProcessMapViewerProps) {
+export default function ProcessMapViewer({ sceneData, isStreaming = false }: ProcessMapViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const svgWrapperRef = useRef<HTMLDivElement>(null);
   const svgSizeRef = useRef<{ w: number; h: number }>({ w: 0, h: 0 });
@@ -30,7 +32,7 @@ export default function ProcessMapViewer({ sceneData }: ProcessMapViewerProps) {
   const posAtPanStart = useRef({ x: 0, y: 0 });
 
   // ── Fit the SVG inside the container with padding ──
-  const fitToView = useCallback(() => {
+  const fitToView = useCallback((opts?: { maxScale?: number }) => {
     const container = containerRef.current;
     const { w: svgW, h: svgH } = svgSizeRef.current;
     if (!container || !svgW || !svgH) return;
@@ -38,11 +40,12 @@ export default function ProcessMapViewer({ sceneData }: ProcessMapViewerProps) {
     const cW = container.clientWidth;
     const cH = container.clientHeight;
     const padding = 40;
+    const maxScale = opts?.maxScale ?? 1; // default: never zoom beyond 100%
 
     const fitScale = Math.min(
       (cW - padding * 2) / svgW,
       (cH - padding * 2) / svgH,
-      1 // never zoom beyond 100 % on initial fit
+      maxScale
     );
     const x = (cW - svgW * fitScale) / 2;
     const y = (cH - svgH * fitScale) / 2;
@@ -51,10 +54,21 @@ export default function ProcessMapViewer({ sceneData }: ProcessMapViewerProps) {
     setPos({ x, y });
   }, []);
 
+  // Track previous streaming state to detect streaming → done transition
+  const prevStreamingRef = useRef(isStreaming);
+  // Track whether we have ever fitted during this non-streaming session
+  const hasFittedRef = useRef(false);
+
   // ── Render SVG from scene data ──
   useEffect(() => {
+    // Don't render if no elements yet
+    if (!sceneData.elements || sceneData.elements.length === 0) return;
+
     let cancelled = false;
-    setLoading(true);
+    // Only show loading spinner on first non-streaming render
+    if (!isStreaming && !prevStreamingRef.current) {
+      setLoading(true);
+    }
 
     async function renderSvg() {
       try {
@@ -88,10 +102,31 @@ export default function ProcessMapViewer({ sceneData }: ProcessMapViewerProps) {
 
         setLoading(false);
 
-        // Fit after a tick so the container has laid out
-        requestAnimationFrame(() => {
-          if (!cancelled) fitToView();
-        });
+        // During streaming: re-fit every render so the view adjusts as elements grow.
+        // Use a low maxScale cap so early elements start small and fill in naturally.
+        // After streaming ends: fit once at normal scale to show the final result.
+        const streamingJustEnded = prevStreamingRef.current && !isStreaming;
+
+        if (isStreaming) {
+          // Re-fit every time during streaming, capped at 0.35 so early elements
+          // don't fill the entire viewport — leaves room for the diagram to grow.
+          requestAnimationFrame(() => {
+            if (!cancelled) {
+              fitToView({ maxScale: 0.35 });
+              hasFittedRef.current = true;
+            }
+          });
+        } else if (streamingJustEnded || !hasFittedRef.current) {
+          // Streaming just ended OR normal (non-streaming) scene load
+          requestAnimationFrame(() => {
+            if (!cancelled) {
+              fitToView();
+              hasFittedRef.current = true;
+            }
+          });
+        }
+
+        prevStreamingRef.current = isStreaming;
       } catch (err) {
         if (!cancelled) {
           console.error("exportToSvg failed:", err);
@@ -103,7 +138,19 @@ export default function ProcessMapViewer({ sceneData }: ProcessMapViewerProps) {
 
     renderSvg();
     return () => { cancelled = true; };
-  }, [sceneData, fitToView]);
+  }, [sceneData, isStreaming, fitToView]);
+
+  // Reset the fitted flag when scene identity changes (new generation)
+  const sceneIdRef = useRef(sceneData);
+  useEffect(() => {
+    if (sceneData !== sceneIdRef.current) {
+      sceneIdRef.current = sceneData;
+      // Only reset if not streaming (streaming manages its own fit)
+      if (!isStreaming) {
+        hasFittedRef.current = false;
+      }
+    }
+  }, [sceneData, isStreaming]);
 
   // ── Re-fit when the container resizes ──
   useEffect(() => {
@@ -225,7 +272,7 @@ export default function ProcessMapViewer({ sceneData }: ProcessMapViewerProps) {
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
         onPointerCancel={handlePointerUp}
-        onDoubleClick={fitToView}
+        onDoubleClick={() => fitToView()}
       >
         <div
           ref={svgWrapperRef}
@@ -263,7 +310,7 @@ export default function ProcessMapViewer({ sceneData }: ProcessMapViewerProps) {
         <div className="w-px h-5 bg-[#3a3a4a]" />
 
         <button
-          onClick={fitToView}
+          onClick={() => fitToView()}
           className="p-1.5 rounded-lg text-[#ccc] hover:text-white hover:bg-[#3a3a4a] transition-colors"
           title="Fit to view (double-click)"
         >

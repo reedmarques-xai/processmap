@@ -1,4 +1,4 @@
-import { SavedMap, ExcalidrawScene } from "./types";
+import { SavedMap, ExcalidrawScene, DiagramVersion } from "./types";
 
 const STORAGE_KEY = "grokessmap_history";
 const MAX_ENTRIES = 50;
@@ -46,6 +46,23 @@ export function updateMapExcalidraw(
   const idx = maps.findIndex((m) => m.id === id);
   if (idx >= 0) {
     maps[idx].excalidrawData = excalidrawData;
+    maps[idx].updatedAt = new Date().toISOString();
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(maps));
+  }
+}
+
+export function updateMapVersions(
+  id: string,
+  versions: DiagramVersion[]
+): void {
+  const maps = getSavedMaps();
+  const idx = maps.findIndex((m) => m.id === id);
+  if (idx >= 0) {
+    maps[idx].versions = versions;
+    // Also keep excalidrawData in sync with the latest version
+    if (versions.length > 0) {
+      maps[idx].excalidrawData = versions[versions.length - 1].excalidrawData;
+    }
     maps[idx].updatedAt = new Date().toISOString();
     localStorage.setItem(STORAGE_KEY, JSON.stringify(maps));
   }

@@ -12,7 +12,7 @@ const xai = createXai({
  */
 export async function getReasoningResponseStreaming(prompt: string) {
   const result = streamText({
-    model: xai.responses("grok-4.20-multi-agent-beta-0309"),
+    model: xai.responses("grok-4.20-multi-agent-0309"),
     prompt,
     providerOptions: {
       xai: { reasoningEffort: "high" },

@@ -2,9 +2,9 @@
 
 export type GrokModelId =
   | "grok-4-1-fast-reasoning"
-  | "grok-4.20-beta-0309-reasoning"
-  | "grok-4.20-multi-agent-beta-0309-low"
-  | "grok-4.20-multi-agent-beta-0309-high";
+  | "grok-4.20-0309-reasoning"
+  | "grok-4.20-multi-agent-0309-low"
+  | "grok-4.20-multi-agent-0309-high";
 
 export interface GrokModelConfig {
   apiModelId: string;                   // actual model name sent to the API
@@ -18,23 +18,23 @@ export const GROK_MODELS: { id: GrokModelId; label: string; config: GrokModelCon
     config: { apiModelId: "grok-4-1-fast-reasoning" },
   },
   {
-    id: "grok-4.20-beta-0309-reasoning",
+    id: "grok-4.20-0309-reasoning",
     label: "Grok 4.2 Reasoning",
-    config: { apiModelId: "grok-4.20-beta-0309-reasoning" },
+    config: { apiModelId: "grok-4.20-0309-reasoning" },
   },
   {
-    id: "grok-4.20-multi-agent-beta-0309-low",
+    id: "grok-4.20-multi-agent-0309-low",
     label: "Grok 4.2 MA (Low)",
-    config: { apiModelId: "grok-4.20-multi-agent-beta-0309", reasoningEffort: "low" },
+    config: { apiModelId: "grok-4.20-multi-agent-0309", reasoningEffort: "low" },
   },
   {
-    id: "grok-4.20-multi-agent-beta-0309-high",
+    id: "grok-4.20-multi-agent-0309-high",
     label: "Grok 4.2 MA (High)",
-    config: { apiModelId: "grok-4.20-multi-agent-beta-0309", reasoningEffort: "high" },
+    config: { apiModelId: "grok-4.20-multi-agent-0309", reasoningEffort: "high" },
   },
 ];
 
-export const DEFAULT_MODEL_ID: GrokModelId = "grok-4.20-multi-agent-beta-0309-low";
+export const DEFAULT_MODEL_ID: GrokModelId = "grok-4.20-multi-agent-0309-low";
 
 export function getModelConfig(modelId: GrokModelId): GrokModelConfig {
   const model = GROK_MODELS.find((m) => m.id === modelId);
@@ -67,6 +67,8 @@ export interface SavedMap {
   excalidrawData: ExcalidrawScene;
   createdAt: string;
   updatedAt: string;
+  /** All diagram versions. If absent, the map has only the original version. */
+  versions?: DiagramVersion[];
 }
 
 // ---- Diagram versioning ----

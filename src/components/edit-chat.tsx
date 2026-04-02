@@ -9,6 +9,7 @@ import {
   GrokModelId,
   DEFAULT_MODEL_ID,
 } from "@/lib/types";
+import { StreamingElementParser } from "@/lib/streaming-element-parser";
 import GrokReasoningBlock from "@/components/ui/grok-reasoning-block";
 
 const MODEL_STORAGE_KEY = "grokessmap_model";
@@ -19,6 +20,10 @@ interface EditChatProps {
   onVersionChange: (version: number) => void;
   getCurrentScene: () => ExcalidrawScene;
   onNewVersion: (scene: ExcalidrawScene, summary: string) => void;
+  /** Called with partial elements as they stream in for live diagram preview. */
+  onStreamingElements?: (elements: Record<string, unknown>[]) => void;
+  /** Called when streaming starts/stops so the parent can toggle isStreaming. */
+  onStreamingStateChange?: (isStreaming: boolean) => void;
 }
 
 export default function EditChat({
@@ -27,6 +32,8 @@ export default function EditChat({
   onVersionChange,
   getCurrentScene,
   onNewVersion,
+  onStreamingElements,
+  onStreamingStateChange,
 }: EditChatProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
@@ -97,6 +104,10 @@ export default function EditChat({
       const decoder = new TextDecoder();
       let buffer = "";
       let result: { excalidraw: ExcalidrawScene; summary: string } | null = null;
+      const elementParser = new StreamingElementParser();
+
+      // Signal streaming started
+      onStreamingStateChange?.(true);
 
       while (true) {
         const { done, value } = await reader.read();
@@ -119,6 +130,12 @@ export default function EditChat({
               
               if (parsed.type === "reasoning") {
                 setReasoningText((prev) => prev + parsed.text);
+              } else if (parsed.type === "text") {
+                // Feed text chunks to the element parser for live preview
+                const newEls = elementParser.push(parsed.text);
+                if (newEls.length > 0) {
+                  onStreamingElements?.(elementParser.getAllElements());
+                }
               } else if (parsed.type === "result") {
                 result = parsed.data;
               } else if (parsed.type === "error") {
@@ -130,6 +147,9 @@ export default function EditChat({
           }
         }
       }
+
+      // Signal streaming ended
+      onStreamingStateChange?.(false);
 
       if (!result) {
         throw new Error("No result received from API");
@@ -157,6 +177,7 @@ export default function EditChat({
     } finally {
       setSending(false);
       setReasoningText("");
+      onStreamingStateChange?.(false);
       // Re-focus the input
       setTimeout(() => inputRef.current?.focus(), 100);
     }

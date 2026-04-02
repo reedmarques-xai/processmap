@@ -54,12 +54,13 @@ export async function POST(req: NextRequest) {
           );
 
           for await (const event of generator) {
-            if (event.type === "reasoning") {
-              // Send reasoning chunk as SSE event
+            if (event.type === "text") {
+              const sseData = `data: ${JSON.stringify({ type: "text", text: event.text })}\n\n`;
+              controller.enqueue(encoder.encode(sseData));
+            } else if (event.type === "reasoning") {
               const sseData = `data: ${JSON.stringify({ type: "reasoning", text: event.text })}\n\n`;
               controller.enqueue(encoder.encode(sseData));
             } else if (event.type === "result") {
-              // Send final result
               const sseData = `data: ${JSON.stringify({ type: "result", data: event.data })}\n\n`;
               controller.enqueue(encoder.encode(sseData));
             }

@@ -1,0 +1,66 @@
+QuickBite Restaurant Chain – Integrating X Sentiment Signals into Prediction/Forecasting Pipelines
+Discovery Call Recording
+Simulated Date: March 2026
+Duration: ~49 minutes
+Participants: Alex Rivera (Senior Enterprise Sales Engineer, xAI) and Marcus Lee (Director of Data 
+Science & Analytics, QuickBite)
+[00:00] Alex Rivera (xAI): Hi Marcus, Alex Rivera from xAI. Thanks for joining. I understand you’r
+looking at ways to strengthen your forecasting accuracy with better external signals. Could you 
+start by walking me through your current demand, inventory, and labor forecasting processes?
+[00:50] Marcus Lee (Director of Data Science & Analytics, QuickBite): Happy to. QuickBite operates 
+820 fast-casual locations. Our forecasting runs daily for next-day planning and intra-day 
+refreshes. Primary data comes from our POS systems — Toast in 680 locations and legacy NCR Aloha i
+the remaining older stores. Sales transactions are pushed every 15 minutes via APIs into our 
+central platform.
+We also ingest loyalty program data from our mobile app, third-party delivery orders from DoorDash, 
+Uber Eats, and Grubhub APIs, real-time inventory from Oracle NetSuite ERP, and external signals 
+like weather from Weather Underground and local event calendars. All of this lands in Snowflake 
+using Fivetran connectors. We maintain a feature store in Databricks Unity Catalog.
+[03:45] Alex Rivera (xAI): Great overview. Can you take me through the actual forecasting models 
+and how external sentiment currently plays a role?
+[04:30] Marcus Lee: Our models run in Databricks. We use Prophet for baseline time-series 
+forecasting, custom LSTM ensembles, and XGBoost for promotional effects. The pipeline is 
+orchestrated with Apache Airflow on Google Kubernetes Engine. Nightly batch jobs produce next-day 
+forecasts, with intra-day refreshes every four hours.
+For social sentiment, we use Brandwatch for structured listening and limited raw X API v2 pulls. We 
+apply basic VADER sentiment plus a fine-tuned BERT model. The data is extremely noisy, has 4–18 
+hour latency, and lacks reliable store-level or hyper-local granularity. We only get usable 
+national signals during big campaigns.
+[07:55] Alex Rivera (xAI): Understood on the current limitations. How does the processed sentiment 
+data flow into your forecasting and downstream operations?
+[08:40] Marcus Lee: Sentiment features are joined in our feature store and fed as exogenous 
+variables into the forecasting models. Adjusted forecasts then flow into NetSuite for automated 
+purchase orders, UKG Dimensions for labor scheduling, and our supply chain optimization tools. When 
+sentiment signals are weak or delayed, we see 8–12% food waste in perishable categories and 
+occasional stockouts during local viral events. The full pipeline processes about 2.8 TB of 
+transactional data daily plus external signals.
+[12:20] Alex Rivera (xAI): Can you walk me through the ETL/ELT architecture in more detail — tools
+frequency, transformations, and error handling?
+[13:10] Marcus Lee: We use Fivetran for extraction, dbt Cloud for transformations, and Spark jobs 
+for heavy lifting. Airflow DAGs include ingestion, cleansing, feature engineering, model inference, 
+and output distribution. We have extensive data quality checks using Great Expectations and 
+automated alerts via PagerDuty. However, X data integration remains batch-only and requires 
+significant manual cleaning due to spam and sarcasm issues.
+[16:40] Alex Rivera (xAI): How do different locations or regions vary in their forecasting needs, 
+and what external events have caused the biggest forecasting misses recently?
+[17:35] Marcus Lee: Urban vs suburban locations have very different patterns. We also see massive 
+swings around sports events, concerts, and weather events. Last summer, we missed a major local 
+sentiment surge around a viral TikTok challenge that X picked up first, leading to $380k in lost 
+revenue and excess waste across 47 stores.
+[21:10] Alex Rivera (xAI): What does your current monitoring, model governance, and A/B testing 
+process look like?
+[22:00] Marcus Lee: We use MLflow for model registry and experiment tracking. Databricks Model 
+Serving handles inference. We run weekly forecast accuracy reviews (current MAPE is 11.4% overall). 
+Governance is handled by a cross-functional team of 14 data scientists, 6 analysts, and 3 ML 
+engineers.
+[25:30] Alex Rivera (xAI): Can you share the overall cost and resource picture for these 
+forecasting operations?
+[26:20] Marcus Lee: The entire data and analytics platform costs us roughly $9.2 million annually, 
+including cloud spend, licensing, and headcount. We still struggle with signal quality from X 
+despite spending on Brandwatch and third-party aggregators.
+[30:15] Alex Rivera (xAI): Marcus, I’ve mapped out your full end-to-end process — POS and delive
+API ingestion, Fivetran + Snowflake + Databricks pipeline, Prophet/LSTM/XGBoost models, current 
+weak X sentiment integration, and the downstream impacts on waste and revenue. xAI can deliver 
+real-time, high-signal Grok-powered sentiment and trend analysis directly from X data. Would you be 
+open to a data feed review and a backtesting POC against your historical forecasts?
+[33:40] Marcus Lee: Absolutely. Let’s set that up.

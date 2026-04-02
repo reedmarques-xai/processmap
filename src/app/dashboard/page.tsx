@@ -6,9 +6,11 @@ import { v4 as uuidv4 } from "uuid";
 import Header from "@/components/header";
 import TranscriptUpload from "@/components/transcript-upload";
 import UseCaseSelector from "@/components/use-case-selector";
+import ProcessMapViewer from "@/components/process-map-editor";
 import HistoryList from "@/components/history-list";
 import { getSavedMaps, saveMap } from "@/lib/storage";
-import { SavedMap, GrokExcalidrawResult, GrokModelId, DEFAULT_MODEL_ID, UseCase, ExtractUseCasesResult } from "@/lib/types";
+import { StreamingElementParser } from "@/lib/streaming-element-parser";
+import { SavedMap, GrokExcalidrawResult, ExcalidrawScene, GrokModelId, DEFAULT_MODEL_ID, UseCase, ExtractUseCasesResult } from "@/lib/types";
 
 const MODEL_STORAGE_KEY = "grokessmap_model";
 
@@ -67,6 +69,9 @@ export default function DashboardPage() {
   // Reasoning text for real-time display
   const [reasoningText, setReasoningText] = useState<string>("");
   const [mapReasoningText, setMapReasoningText] = useState<string>("");
+
+  // Live streaming preview of the diagram being generated
+  const [streamingScene, setStreamingScene] = useState<ExcalidrawScene | null>(null);
 
   // Check auth
   useEffect(() => {
@@ -164,6 +169,7 @@ export default function DashboardPage() {
     setGeneratingMap(true);
     setError(null);
     setMapReasoningText("");
+    setStreamingScene(null);
 
     try {
       const modelId: GrokModelId =
@@ -188,6 +194,7 @@ export default function DashboardPage() {
       const decoder = new TextDecoder();
       let buffer = "";
       let grokResult: GrokExcalidrawResult | null = null;
+      const elementParser = new StreamingElementParser();
 
       while (true) {
         const { done, value } = await reader.read();
@@ -210,6 +217,16 @@ export default function DashboardPage() {
               
               if (parsed.type === "reasoning") {
                 setMapReasoningText((prev) => prev + parsed.text);
+              } else if (parsed.type === "text") {
+                // Feed text to the element parser for live diagram preview
+                const newEls = elementParser.push(parsed.text);
+                if (newEls.length > 0) {
+                  setStreamingScene({
+                    elements: elementParser.getAllElements(),
+                    appState: {},
+                    files: {},
+                  });
+                }
               } else if (parsed.type === "result") {
                 grokResult = parsed.data;
               } else if (parsed.type === "error") {
@@ -252,6 +269,7 @@ export default function DashboardPage() {
     } finally {
       setGeneratingMap(false);
       setMapReasoningText("");
+      setStreamingScene(null);
     }
   };
 
@@ -262,10 +280,13 @@ export default function DashboardPage() {
     setError(null);
   };
 
-  // Use wider container for use case selection (side-by-side layout)
-  const containerClass = flowStep === "select-use-case" 
-    ? "max-w-4xl" 
-    : "max-w-2xl";
+  // Use wider container for use case selection or streaming preview
+  const showStreamingPreview = generatingMap && streamingScene && streamingScene.elements.length > 0;
+  const containerClass = showStreamingPreview
+    ? "max-w-7xl"
+    : flowStep === "select-use-case" 
+      ? "max-w-4xl" 
+      : "max-w-2xl";
 
   return (
     <div className="min-h-screen bg-background">
@@ -290,14 +311,33 @@ export default function DashboardPage() {
           )}
 
           {flowStep === "select-use-case" && extractedUseCases && (
-            <UseCaseSelector
-              useCases={extractedUseCases.useCases}
-              transcriptSummary={extractedUseCases.transcriptSummary}
-              onSelectUseCase={handleGenerateForUseCase}
-              onBack={handleBackToUpload}
-              loading={generatingMap}
-              reasoningText={mapReasoningText}
-            />
+            <div className={showStreamingPreview ? "flex gap-6 items-start" : ""}>
+              <div className={showStreamingPreview ? "w-[380px] shrink-0" : ""}>
+                <UseCaseSelector
+                  useCases={extractedUseCases.useCases}
+                  transcriptSummary={extractedUseCases.transcriptSummary}
+                  onSelectUseCase={handleGenerateForUseCase}
+                  onBack={handleBackToUpload}
+                  loading={generatingMap}
+                  reasoningText={mapReasoningText}
+                />
+              </div>
+
+              {/* Live diagram preview during generation */}
+              {showStreamingPreview && (
+                <div className="flex-1 min-w-0 rounded-xl border border-border overflow-hidden bg-surface" style={{ height: "600px" }}>
+                  <div className="px-3 py-2 border-b border-border bg-surface flex items-center gap-2">
+                    <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+                    <span className="text-xs text-muted">
+                      Building diagram… {streamingScene!.elements.length} elements
+                    </span>
+                  </div>
+                  <div className="h-[calc(100%-36px)]">
+                    <ProcessMapViewer sceneData={streamingScene!} isStreaming={true} />
+                  </div>
+                </div>
+              )}
+            </div>
           )}
 
           {error && (
