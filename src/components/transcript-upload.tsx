@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, useRef, useCallback, useEffect } from "react";
-import { Upload, FileText, X, Sparkles, ClipboardPaste, ChevronDown, ChevronUp } from "lucide-react";
+import { useState, useRef, useCallback } from "react";
+import { Upload, FileText, X, Sparkles, ClipboardPaste } from "lucide-react";
 import { cn } from "@/lib/utils";
-import GrokThinkingLottie from "@/components/ui/grok-thinking-lottie";
+import GrokReasoningBlock from "@/components/ui/grok-reasoning-block";
 
 interface TranscriptUploadProps {
   onGenerate: (transcript: string) => void;
@@ -22,16 +22,7 @@ export default function TranscriptUpload({
   const [fileName, setFileName] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const [mode, setMode] = useState<"upload" | "paste">("upload");
-  const [reasoningExpanded, setReasoningExpanded] = useState(true);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const reasoningRef = useRef<HTMLDivElement>(null);
-
-  // Auto-scroll reasoning text to bottom
-  useEffect(() => {
-    if (reasoningRef.current && reasoningText && reasoningExpanded) {
-      reasoningRef.current.scrollTop = reasoningRef.current.scrollHeight;
-    }
-  }, [reasoningText, reasoningExpanded]);
 
   const handleFile = useCallback((file: File) => {
     if (!file.name.endsWith(".txt")) {
@@ -198,38 +189,10 @@ export default function TranscriptUpload({
 
           {/* Preview - show reasoning when loading, otherwise show transcript preview */}
           {loading ? (
-            <div className="space-y-3">
-              {/* Reasoning Section (collapsible) - always show when loading */}
-              <div className="bg-surface rounded-lg border border-amber-500/30 overflow-hidden">
-                <button
-                  onClick={() => setReasoningExpanded(!reasoningExpanded)}
-                  className="w-full flex items-center gap-2 px-3 py-2 bg-amber-500/10 border-b border-amber-500/20 hover:bg-amber-500/15 transition-colors"
-                >
-                  <GrokThinkingLottie size={20} />
-                  <p className="text-xs text-amber-400 font-medium uppercase tracking-wider">
-                    Grok is thinking...
-                  </p>
-                  <div className="ml-auto flex items-center gap-2">
-                    {reasoningExpanded ? (
-                      <ChevronUp className="w-4 h-4 text-amber-400" />
-                    ) : (
-                      <ChevronDown className="w-4 h-4 text-amber-400" />
-                    )}
-                  </div>
-                </button>
-                {reasoningExpanded && (
-                  <div
-                    ref={reasoningRef}
-                    className="p-3 h-48 overflow-y-auto font-mono text-xs text-amber-200/80 whitespace-pre-wrap break-words bg-amber-950/20"
-                  >
-                    {reasoningText || (
-                      <span className="text-amber-400/50 italic">Waiting for reasoning...</span>
-                    )}
-                    <span className="inline-block w-2 h-4 bg-amber-400/60 animate-pulse ml-0.5" />
-                  </div>
-                )}
-              </div>
-            </div>
+            <GrokReasoningBlock
+              reasoningText={reasoningText}
+              isLoading={loading}
+            />
           ) : previewLines.length > 0 ? (
             <div className="bg-surface rounded-lg p-3 border border-border">
               <p className="text-xs text-muted mb-2 uppercase tracking-wider font-medium">

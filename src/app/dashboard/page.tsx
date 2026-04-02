@@ -8,6 +8,7 @@ import TranscriptUpload from "@/components/transcript-upload";
 import UseCaseSelector from "@/components/use-case-selector";
 import ProcessMapViewer from "@/components/process-map-editor";
 import HistoryList from "@/components/history-list";
+import ExamplesDrawer from "@/components/examples-drawer";
 import { getSavedMaps, saveMap } from "@/lib/storage";
 import { StreamingElementParser } from "@/lib/streaming-element-parser";
 import { SavedMap, GrokExcalidrawResult, ExcalidrawScene, GrokModelId, DEFAULT_MODEL_ID, UseCase, ExtractUseCasesResult } from "@/lib/types";
@@ -290,6 +291,7 @@ export default function DashboardPage() {
 
   return (
     <div className="min-h-screen bg-background">
+      <ExamplesDrawer />
       <Header />
 
       <main className={`${containerClass} mx-auto px-4 py-8 transition-all duration-300`}>

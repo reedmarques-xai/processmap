@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { Map, LogOut, ChevronDown, Cpu } from "lucide-react";
+import { Map, LogOut, ChevronDown, Cpu, Sun, Moon } from "lucide-react";
 import { GROK_MODELS, GrokModelId, DEFAULT_MODEL_ID } from "@/lib/types";
 
 const STORAGE_KEY = "grokessmap_model";
@@ -13,10 +13,13 @@ interface HeaderProps {
   actions?: React.ReactNode;
 }
 
+const THEME_KEY = "grokessmap_theme";
+
 export default function Header({ showBack, title, actions }: HeaderProps) {
   const router = useRouter();
   const [selectedModel, setSelectedModel] = useState<GrokModelId>(DEFAULT_MODEL_ID);
   const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [isLightTheme, setIsLightTheme] = useState(true);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   // Load saved model on mount
@@ -26,6 +29,32 @@ export default function Header({ showBack, title, actions }: HeaderProps) {
       setSelectedModel(saved);
     }
   }, []);
+
+  // Load and apply saved theme on mount
+  useEffect(() => {
+    const savedTheme = localStorage.getItem(THEME_KEY);
+    // Default to light mode unless explicitly set to "dark"
+    const shouldBeLight = savedTheme !== "dark";
+    setIsLightTheme(shouldBeLight);
+    if (shouldBeLight) {
+      document.documentElement.classList.add("light");
+    } else {
+      document.documentElement.classList.remove("light");
+    }
+  }, []);
+
+  // Toggle theme
+  const toggleTheme = () => {
+    const newIsLight = !isLightTheme;
+    setIsLightTheme(newIsLight);
+    if (newIsLight) {
+      document.documentElement.classList.add("light");
+      localStorage.setItem(THEME_KEY, "light");
+    } else {
+      document.documentElement.classList.remove("light");
+      localStorage.setItem(THEME_KEY, "dark");
+    }
+  };
 
   // Persist on change
   const handleSelectModel = (modelId: GrokModelId) => {
@@ -115,6 +144,14 @@ export default function Header({ showBack, title, actions }: HeaderProps) {
         </div>
 
         {actions}
+        {/* Theme Toggle */}
+        <button
+          onClick={toggleTheme}
+          className="p-2 rounded-lg text-muted hover:text-foreground hover:bg-surface-hover transition-all"
+          title={isLightTheme ? "Switch to dark mode" : "Switch to light mode"}
+        >
+          {isLightTheme ? <Moon className="w-4 h-4" /> : <Sun className="w-4 h-4" />}
+        </button>
         <button
           onClick={handleLogout}
           className="p-2 rounded-lg text-muted hover:text-foreground hover:bg-surface-hover transition-all"
